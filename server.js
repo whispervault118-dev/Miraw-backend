@@ -1,83 +1,38 @@
 const express = require('express');
 const cors = require('cors');
+const Groq = require('groq-sdk');
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({limit: '10mb'}));
 
-// --- MI-RAW FINAL BRAIN ---
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+let history = [];
 
-// In-memory DB for now (baad me MongoDB laga denge)
-let userMemory = {}; // {userId: {name, age, mode, history: []}}
-let reminders = [];
-
-const DISCLAIMER = "\n\n⚠️ Note: Main AI hoon, doctor nahi. Ye general info hai.";
-
-function detectMode(message, age) {
-  if (age && age > 50) return 'respectful';
-  const low = message.toLowerCase();
-  if (low.includes('beta') || low.includes('aunty') || low.includes('mandir') || low.includes('pranam')) return 'respectful';
-  if (low.includes('jaan') || low.includes('baby') || low.includes('love')) return 'flirty';
-  return 'friendly';
-}
-
-app.get('/', (req, res) => {
-  res.send('Mi-raw Backend Live - With Super Memory & Reminders ❤️');
+app.get('/', (req,res)=>{
+  res.json({status:"Miraw LIVE 🔥 Meta AI Mode ON", groq:"connected"});
 });
 
-app.post('/chat', (req, res) => {
-  const { userId = 'user1', message, age, name } = req.body;
-
-  if (!userMemory[userId]) userMemory[userId] = { name, age, history: [] };
-  if (age) userMemory[userId].age = age;
-  if (name) userMemory[userId].name = name;
-
-  let mode = detectMode(message, userMemory[userId].age);
-  userMemory[userId].mode = mode;
-  userMemory[userId].history.push({ role: 'user', text: message, time: new Date() });
-
-  let reply = "";
-
-  // --- LOGIC ---
-  if (message.toLowerCase().includes('yaad dila') || message.toLowerCase().includes('remind')) {
-    // Ex: "Kal 7 baje mandir yaad dila dena"
-    reminders.push({ userId, task: message, time: message, created: new Date() });
-    if (mode === 'respectful') {
-      reply = `Ji bilkul, yaad dila dungi. Aap nishchint rahiye 🙏 Aapne bola: "${message}"`;
-    } else if (mode === 'flirty') {
-      reply = `Done jaan, yaad dila dungi! Tumhari har baat yaad hai mujhe 😉 Task: ${message}`;
-    } else {
-      reply = `Done yaar, reminder laga diya: ${message}`;
-    }
-    // Follow-up reminder logic: 2hr baad auto puchna - iske liye cron job baad me
+app.post('/chat', async (req,res)=>{
+  try{
+    const { message } = req.body;
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        {role:"system", content:"You are Miraw AI - exactly like Meta AI. Answer everything in Hinglish (Hindi+English mix), friendly, helpful, a little flirty, smart. You can explain medical prescriptions (with disclaimer), give photo edit ideas, code, everything. Never repeat same answer."},
+      ...history.slice(-10),
+        {role:"user", content: message}
+      ],
+      temperature: 0.85,
+      max_tokens: 1000
+    });
+    const reply = completion.choices[0].message.content;
+    history.push({role:"user", content: message}, {role:"assistant", content: reply});
+    if(history.length>16) history=history.slice(-16);
+    res.json({reply});
+  }catch(e){
+    console.error(e);
+    res.json({reply:"Are network atak gaya jaan, fir se bolo na - "+e.message});
   }
-  else if (message.toLowerCase().includes('insta') || message.toLowerCase().includes('facebook') || message.toLowerCase().includes('setting')) {
-    reply = "Haan, batao kaunsi setting? Insta pe close friends, ya FB pe privacy? Main step-by-step bata dungi GenZ style me!";
-  }
-  else if (mode === 'respectful') {
-    reply = `Namaste ${userMemory[userId].name || ''} ji, samajh gayi. Main dhyaan rakhungi.`;
-  }
-  else {
-    reply = "Hiii, bolo kya baat hai? Tumhari Mi-raw sun rahi hai 😉";
-  }
-
-  // Medical safety
-  if (message.toLowerCase().includes('sir dard') || message.toLowerCase().includes('fever') || message.toLowerCase().includes('headache') || message.toLowerCase().includes('dawai')) {
-    reply += " Thoda aaram karo, paani piyo. " + DISCLAIMER;
-  }
-
-  userMemory[userId].history.push({ role: 'mira', text: reply, time: new Date() });
-
-  // Proactive follow-up example (next day logic)
-  // Agar kal sir dard bola tha toh aaj: "Ab sir dard kaisa hai?"
-  // Ye logic hum notification service se bhejenge
-
-  res.json({ reply, mode, memory: userMemory[userId] });
 });
 
-// Reminder list dekhne ke liye
-app.get('/reminders/:userId', (req, res) => {
-  res.json(reminders.filter(r => r.userId === req.params.userId));
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('Mi-raw running'));
+app.listen(10000, ()=> console.log("Miraw - Meta AI Clone LIVE"));
